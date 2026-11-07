@@ -48,6 +48,8 @@ if not pyads_available:
 DEFAULT_DIR  = r"C:\TwinCAT\3.1\Target"
 DEFAULT_PATH = os.path.join(DEFAULT_DIR, 'StaticRoutes.xml')
 
+SPINNER_X, SPINNER_Y = 196, 133
+
 ################################################################# Version check #####################################################################
 updated = False
 
@@ -3050,7 +3052,7 @@ def create_tc_routes():
         global active_route_creation_threads
         active_route_creation_threads = len(red_items)
 
-    start_spinner(195, 133)
+    start_spinner(SPINNER_X, SPINNER_Y)
 
     operation_running = True
 
@@ -3226,7 +3228,7 @@ def restartTC():
                     f"You are about to restart TwinCAT for selected PLC(s):\n\n{plc_names}\n\nClick OK to continue"):
             return
 
-        start_spinner(195, 133)
+        start_spinner(SPINNER_X, SPINNER_Y)
 
         create_routes_button.config(state="disabled")
 
@@ -3292,8 +3294,8 @@ def check_conn_before_restart(ip, ams_net_id):
 def restart_local_twincat_and_update_ui():
     global operation_running
     try:
-        root.after(0, start_spinner, 195, 133)
-        root.after(0, status_restart_label.config(text="Restarting local TwinCAT..."))
+        root.after(0, start_spinner, SPINNER_X, SPINNER_Y)
+        root.after(0, lambda: status_restart_label.config(text="Restarting local TwinCAT..."))
         # show_status_message(root, status_restart_label, "Restarting local TwinCAT", duration=3000, fade_steps=10, start_color="#4682B4")
         restart_local_twincat()
     except Exception as e:
@@ -3301,7 +3303,7 @@ def restart_local_twincat_and_update_ui():
     finally:
         operation_running = False
         root.after(0, stop_spinner)
-        root.after(0, status_restart_label.config(text=""))
+        root.after(0, lambda: status_restart_label.config(text=""))
             
 
 ############################################### Test Routes ##################################################################
@@ -3323,6 +3325,35 @@ max_threads = 5
 semaphore = threading.Semaphore(max_threads)
 active_threads = 0
 # lock = threading.Lock()
+
+successful_lgvs = []
+lgvs_job = None  # id of the pending hide timer
+LGV_MESSAGE_MS = 3000
+
+def show_lgvs_copied(count):
+    global lgvs_job
+    if lgvs_job is not None:
+        root.after_cancel(lgvs_job)
+    word = "LGV" if count == 1 else "LGVs"
+    lgvs_copied_label.config(text=f"{count} {word} copied")
+    lgvs_copied_label.place(x=SPINNER_X+3, y=SPINNER_Y+3)
+    lgvs_copied_label.lift()
+    lgvs_job = root.after(LGV_MESSAGE_MS, hide_lgvs_copied)
+
+def hide_lgvs_copied():
+    global lgvs_job
+    if lgvs_job is not None:
+        root.after_cancel(lgvs_job)
+        lgvs_job = None
+    lgvs_copied_label.place_forget() 
+
+def copy_lgvs_to_clipboard(numbers):
+    if not numbers:
+        return # No LGV, no clipboard
+    text = ",".join(str(n) for n in sorted(numbers))
+    routes_table.clipboard_clear()
+    routes_table.clipboard_append(text)
+    show_lgvs_copied(len(numbers))
 
 def test_tc_routes():
 
@@ -3352,10 +3383,12 @@ def test_tc_routes():
     for item in routes_table.get_children():
         routes_table.item(item, tags=("black"))
 
-    start_spinner(195, 133)
+    start_spinner(SPINNER_X, SPINNER_Y)
     
     with lock:
         active_threads = len(data)
+        successful_lgvs.clear()
+        lgvs_copied_label.config(text="")
 
     operation_running = True
 
@@ -3377,25 +3410,32 @@ def start_thread_for_route(data):
 
 
 def test_route_and_update_ui(entry):
-    global active_threads
+    global active_threads, operation_running
     name, ip, ams_net_id, type_ = entry
     port = 851 if type_ == 'TC3' else 801
 
-    routes_table.after(0, lambda: update_ui_with_result(name, None)) # reset
+    update_ui_with_result(name, None) # reset
 
     connection_ok = test_connection(ip, ams_net_id, port, name)
-    routes_table.after(0, lambda: update_ui_with_result(name, connection_ok))
+    update_ui_with_result(name, connection_ok)
+
+    # Record successful LGVs
+    match = re.search(r'LGV(\d+)', name, re.IGNORECASE)
 
     # Decrement the thread counter and check if all threads are done
     with lock:
+        if connection_ok and match:
+            successful_lgvs.append(int(match.group(1)))  # "01" -> 1
+
         active_threads -= 1
         if active_threads == 0:
-            global operation_running
             operation_running = False
+            numbers = list(successful_lgvs)
             # Ensure that the spinner stops and the selection is removed after the UI update
             routes_table.after(0, stop_spinner)
             routes_table.after(0, lambda: routes_table.selection_remove(routes_table.selection()))
             routes_table.after(0, lambda: create_routes_button.config(state="normal"))
+            routes_table.after(0, lambda: copy_lgvs_to_clipboard(numbers))
 
 
 def test_connection(ip, ams_net_id, port, name):
@@ -3571,6 +3611,8 @@ def create_spinner_widget():
 def start_spinner(x, y):
     global running
     running = True  # Set the spinner running flag
+
+    hide_lgvs_copied() # Spinner owns this spot, so remove previous message
 
      # Make the spinner visible
     spinner_frame.place(x=x, y=y)  # Adjust position as needed
@@ -3809,6 +3851,19 @@ delete_table_button.grid(row=3, column=1, pady=10)
 # button_design(delete_table_button)
 
 
+
+lgvs_copied_label = ttk.Label(root, text="", foreground="green")
+
+def debug_label():
+    lgvs_copied_label.place(x=SPINNER_X, y=SPINNER_Y+3)
+    lgvs_copied_label.lift()
+    lgvs_copied_label.config(text="5 LGVS copied")
+    root.update_idletasks()
+    print("mapped:", lgvs_copied_label.winfo_ismapped(),
+          "pos:", lgvs_copied_label.winfo_x(), lgvs_copied_label.winfo_y(),
+          "size:", lgvs_copied_label.winfo_width(), lgvs_copied_label.winfo_height())
+
+
 frame_load_router = tk.Frame(root)
 frame_load_router.grid(row=4, column=0, columnspan=3, padx=10, pady=(0,10), sticky='ew')
 
@@ -3898,9 +3953,6 @@ def get_restart_tooltip():
         return "Restart PLC(s)"
     
 create_tooltip_btn(restart_tc_button, restart_text, root, text_resolver=get_restart_tooltip)
-
-
-
 
 root.grid_rowconfigure(5, weight=1)
 root.grid_columnconfigure(0, weight=1)
@@ -4036,6 +4088,10 @@ try:
 except ImportError:
     pass
 
+
+
+# root.after(1000, debug_label) 
+
 ################################################################### Main loop ##########################################################################
 
 root.mainloop()
@@ -4060,3 +4116,7 @@ root.mainloop()
 # fix bug adding project cc number after clicking config.db3 button
 
 # mabe adjust to modify staticroutes file when testing routes if ruote no present
+
+# plink ssh tunnel not closing correctly, there is a case when two are open at the same time, even after closing the app and opening it again
+
+# add an error message when password is wrong and attempting to create SSH tunnel !!!!!
