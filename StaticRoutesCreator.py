@@ -1944,6 +1944,14 @@ def create_ssh_tunnel_putty():
         rebuild_context_menu()
 
 
+def close_ssh_tunnel_plink():
+    """Close the active SSH tunnel and clear its state"""
+    global active_ssh_tunnel, active_lgv
+    close_plink()
+    active_ssh_tunnel, active_lgv = None, None
+    tunnel_label.config(text="")
+
+
 def create_ssh_tunnel_plink():
     """Create SSH tunnels using Plink for the selected LGV, and prevent duplicates."""
     global active_ssh_tunnel, active_lgv
@@ -1957,19 +1965,9 @@ def create_ssh_tunnel_plink():
                                    f"Tunnel creation for {lgv} not possible.\nHost is not reachable")
         return
 
+    # Close previous tunnel if any active
     if is_plink_running():
-        if active_ssh_tunnel == ssh_host:
-            response = messagebox.askyesno("SSH Tunnel", f"Do you want to close the active tunnel to {lgv}?")
-            if response:
-                close_plink()
-                active_ssh_tunnel, active_lgv = None, None
-                tunnel_label.config(text="")
-            return
-        elif messagebox.askyesno("SSH Tunnel", f"A tunnel to {active_lgv} is already active. \nDo you want to close it?"):
-            close_plink()
-            tunnel_label.config(text="")
-        else:
-            return
+        close_ssh_tunnel_plink()
         
     tunnels = get_tunnels()
 
@@ -3658,29 +3656,22 @@ def rebuild_context_menu():
 
     # ---- TC3: SSH options ----
     if tc_type.upper() == "TC3" and "LGV" in lgv_name:
-        single_tunnel = False
-        ssh_tunnel_label = "Open"
 
         if active_ssh_tunnel == target_ip:
-            ssh_tunnel_label = "Close"
-            single_tunnel = True
 
-        ssh_tunnel_submenu = tk.Menu(context_menu, tearoff=0)
-        ssh_tunnel_submenu.add_command(label=ssh_tunnel_label, command=create_ssh_tunnel_plink)
-        ssh_tunnel_submenu.add_command(
-            label="VNC",
-            command=launch_vnc_ssh,
-            state="normal" if single_tunnel else "disabled"
-        )
-        ssh_tunnel_submenu.add_command(
-            label="Safe RDP",
-            command=open_safe_rdp,
-            state="normal" if single_tunnel else "disabled"
-        )
+            ssh_tunnel_submenu = tk.Menu(context_menu, tearoff=0)
+            ssh_tunnel_submenu.add_command(label="VNC", command=launch_vnc_ssh)
+            ssh_tunnel_submenu.add_command(label="Safe RDP", command=open_safe_rdp)
+            ssh_tunnel_submenu.add_separator()
+            ssh_tunnel_submenu.add_command(label="Close", command=close_ssh_tunnel_plink)
+        
+            context_menu.add_cascade(label="SSH Tunnel", menu=ssh_tunnel_submenu)
+        else:
+            context_menu.add_command(label="Open SSH", command=create_ssh_tunnel_plink)
 
-        context_menu.add_cascade(label="SSH Tunnel", menu=ssh_tunnel_submenu)
         context_menu.add_command(label="RDP", command=open_remote_connection)
         context_menu.add_command(label="WinSCP", command=open_winscp_session)
+        
 
     # ---- TC2: Local VNC and RDP ----
     elif tc_type.upper() == "TC2" or not ("LGV" in lgv_name):
