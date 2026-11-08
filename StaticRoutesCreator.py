@@ -492,12 +492,13 @@ def delete_selected_record_from_menu():
 
 # Function to show the context menu
 def show_context_menu(event):
-    # Check if a record is selected
-    rebuild_context_menu()
+    """Select the row under the cursor and show its context menu"""
     selected_item = routes_table.identify_row(event.y)
     if selected_item:
         routes_table.selection_set(selected_item)
-        context_menu.post(event.x_root, event.y_root)
+        rebuild_context_menu()
+        context_menu.tk_popup(event.x_root, event.y_root)
+        # context_menu.post(event.x_root, event.y_root)
 
 # With DEL key
 def delete_selected_record(event):
@@ -1874,6 +1875,7 @@ active_processes = {}
 
 active_ssh_tunnel = None  # Stores the active SSH host
 active_lgv = None
+monitor_tunnel_job = None
 
 def create_ssh_tunnel_putty():
     """Create SSH tunnels for the selected LGV, and prevent duplicates"""
@@ -1941,20 +1943,22 @@ def create_ssh_tunnel_putty():
 
         root.after(5000, monitor_putty_status)
 
-        rebuild_context_menu()
-
 
 def close_ssh_tunnel_plink():
     """Close the active SSH tunnel and clear its state"""
-    global active_ssh_tunnel, active_lgv
+    global active_ssh_tunnel, active_lgv, monitor_tunnel_job, host_unreachable_count
+    if monitor_tunnel_job:
+        root.after_cancel(monitor_tunnel_job)
+        monitor_tunnel_job = None
     close_plink()
     active_ssh_tunnel, active_lgv = None, None
+    host_unreachable_count = 0
     tunnel_label.config(text="")
 
 
 def create_ssh_tunnel_plink():
-    """Create SSH tunnels using Plink for the selected LGV, and prevent duplicates."""
-    global active_ssh_tunnel, active_lgv
+    """Open an SSH tunnel to the selected LGV using Plink, closing any existing tunnel first."""
+    global active_ssh_tunnel, active_lgv, monitor_tunnel_job
 
     selected_item = routes_table.selection()
     ssh_host = routes_table.item(selected_item)["values"][1]
@@ -1965,9 +1969,6 @@ def create_ssh_tunnel_plink():
                                    f"Tunnel creation for {lgv} not possible.\nHost is not reachable")
         return
 
-    # Close previous tunnel if any active
-    if is_plink_running():
-        close_ssh_tunnel_plink()
         
     tunnels = get_tunnels()
 
@@ -1982,14 +1983,17 @@ def create_ssh_tunnel_plink():
         error = "Input password."
     elif not tunnels:
         error = "No tunnels found to create."
-    # elif not is_host_reachable(ssh_host):
-    #     error = f"Host {ssh_host} unreachable"
+
 
     if error:
         print(error)
         messagebox.showwarning("Attention", error)
         tunnel_label.config(text="")
         return
+
+    # Close previous tunnel if any active (only once everything is validated)
+    if is_plink_running():
+        close_ssh_tunnel_plink()
 
     plink_path = extract_executable("plink.exe", "resources")
     print(f"Plink path: {plink_path}")
@@ -2004,9 +2008,10 @@ def create_ssh_tunnel_plink():
         tunnel_label.config(text=f"SSH Tunnel for {result_lgv} active")
         print(f"SSH Tunnel created for {result_lgv}")
 
-        root.after(5000, monitor_plink_status)
+        monitor_tunnel_job = root.after(5000, monitor_plink_status)
 
-        rebuild_context_menu()
+    else:
+        messagebox.showwarning("SSH Tunnel", f"Could not create tunnel for {lgv}")
 
 
 def is_process_running_deprecated(process_name):
@@ -2119,7 +2124,6 @@ def monitor_putty_status():
         active_ssh_tunnel = None
         active_lgv= None
         host_unreachable_count = 0
-        rebuild_context_menu() 
         return
 
     host_is_alive = is_host_reachable(active_ssh_tunnel)
@@ -2136,7 +2140,6 @@ def monitor_putty_status():
             active_ssh_tunnel = None
             active_lgv = None
             host_unreachable_count = 0
-            rebuild_context_menu()
             return
     else:
         host_unreachable_count = 0  # Reset on successful ping
@@ -2146,19 +2149,21 @@ def monitor_putty_status():
 
 
 def monitor_plink_status():
-    global active_ssh_tunnel, active_lgv, host_unreachable_count
+    global active_ssh_tunnel, active_lgv, host_unreachable_count, monitor_tunnel_job
 
     if not active_ssh_tunnel:
         return
 
     # Get the stored plink proces
     if not is_plink_running():
+        closed_lgv = active_lgv
         print(f"Plink tunnel to {active_lgv} has been closed.")
         tunnel_label.config(text="")
         active_ssh_tunnel = None
         active_lgv = None
+        monitor_tunnel_job = None
         host_unreachable_count = 0
-        rebuild_context_menu()
+        messagebox.showwarning("SSH Tunnel", f"Tunnel to {closed_lgv} closed unexpectedly")
         return
 
     # Network still reachable?
@@ -2168,21 +2173,22 @@ def monitor_plink_status():
         host_unreachable_count += 1
         print(f"[{host_unreachable_count}/{HOST_UNREACHABLE_LIMIT}] Host {active_ssh_tunnel} unreachable.")
         if host_unreachable_count >= HOST_UNREACHABLE_LIMIT:
+            lost_host = active_ssh_tunnel
             print(f"Host {active_ssh_tunnel} persistently unreachable. Closing Plink tunnel.")
             close_all_processes()
             tunnel_label.config(text="")
-            messagebox.showwarning("Connection Lost",
-                                   f"Connection to {active_ssh_tunnel} was lost.\nTunnel has been closed.")
             active_ssh_tunnel = None
             active_lgv = None
+            monitor_tunnel_job = None
             host_unreachable_count = 0
-            rebuild_context_menu()
+            messagebox.showwarning("Connection Lost",
+                                    f"Connection to {lost_host} was lost.\nTunnel has been closed.")
             return
     else:
         host_unreachable_count = 0  # Reset if ping succeeded
         print(f"Host {active_ssh_tunnel} reachable with method {host_is_alive.method}.")
 
-    root.after(5000, monitor_plink_status)
+    monitor_tunnel_job = root.after(5000, monitor_plink_status)
      
 
 def close_plink():
