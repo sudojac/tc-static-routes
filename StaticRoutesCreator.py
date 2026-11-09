@@ -2068,9 +2068,16 @@ def _on_ssh_tunnel_finished(lgv, ssh_host, result, closed_old):
     match_lgv = re.search(r"(LGV\d+)", lgv)
     result_lgv = match_lgv.group(1) if match_lgv else lgv
     tunnel_label.config(text=f"SSH Tunnel for {result_lgv} active")
+    if closed_old:
+        flash_tunnel_label()
     print(f"SSH Tunnel created for {result_lgv}")
 
     monitor_tunnel_job = root.after(5000, monitor_plink_status)
+
+def flash_tunnel_label():
+    """Briefly highlight the tunnel label to signal a host change."""
+    tunnel_label.config(background="#fff3b0")  # soft yellow
+    root.after(1500, tunnel_label.config, {"background": ""})
 
 def is_process_running_deprecated(process_name):
     """Check if a tracked process is still running and remove it if not."""
@@ -4133,7 +4140,7 @@ setup_tunnel_button = ttk.Button(frame_save_file, text="  Setup SSH   ",
                             command=open_ssh_config_window_cond)
 setup_tunnel_button.grid(row=1, column=3, padx=5, pady=5)
 
-tunnel_label = ttk.Label(frame_save_file, text="", foreground="#4682B4")
+tunnel_label = ttk.Label(frame_save_file, text="", foreground="#4682B4", font=("Segoe UI semibold", 9))
 tunnel_label.place(relx=1.0, rely=0.0, x=-5, y=-20, anchor="ne")
 
 status_restart_label = ttk.Label(frame_save_file, text="", foreground="#4682B4")
