@@ -26,6 +26,7 @@ import base64
 import logging
 from ftplib import FTP_PORT
 from datetime import datetime
+import tempfile
 
 from myutils.autoupdater import check_for_updates_async, get_app_version
 from myutils.connectivity import is_host_reachable, is_port_open
@@ -49,6 +50,8 @@ DEFAULT_DIR  = r"C:\TwinCAT\3.1\Target"
 DEFAULT_PATH = os.path.join(DEFAULT_DIR, 'StaticRoutes.xml')
 
 SPINNER_X, SPINNER_Y = 196, 133
+
+PLINK_STDERR_LOG = os.path.join(tempfile.gettempdir(), "super_routes_plink.log")
 
 ################################################################# Version check #####################################################################
 updated = False
@@ -1698,7 +1701,7 @@ def update_ssh_state(*args):
 # logging.basicConfig(level=logging.DEBUG)
 
 
-def start_process(process_name, command, instance_key=None, cwd=None):
+def start_process(process_name, command, instance_key=None, cwd=None, stderr=None):
     """Start a process and store its PID, with optional working directory"""
     creationflags = subprocess.CREATE_NO_WINDOW if platform.system().lower() == "windows" else 0
 
@@ -1706,7 +1709,8 @@ def start_process(process_name, command, instance_key=None, cwd=None):
         command, 
         shell=False, 
         creationflags=creationflags,
-        cwd=cwd)
+        cwd=cwd,
+        stderr=stderr)
 
     if instance_key:
         # Multi-instance mode (e.g., vnc.exe, cerhost.exe)
@@ -1861,15 +1865,24 @@ def open_plink_with_tunnels(plink_path, remote_host, ssh_port, ssh_username, ssh
 
     print("Launching plink with cmd:", " ".join(plink_cmd))
     try:
-        start_process(
-            "plink", 
-            plink_cmd,
-            cwd=os.path.dirname(plink_path))
+        with open(PLINK_STDERR_LOG, "w") as stderr_file:
+            start_process(
+                "plink", 
+                plink_cmd,
+                cwd=os.path.dirname(plink_path),
+                stderr=stderr_file)
         return True
     except Exception as e:
         print(f"Error launching Plink: {e}")
         return False
 
+def read_plink_error():
+    """Return whatever plink wrote to stderr (empty string if nothing / unreadable)."""
+    try:
+        with open(PLINK_STDERR_LOG, "r", errors="replace") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
 
 active_processes = {}
 
@@ -1952,6 +1965,7 @@ def reset_plink_tunnel_state():
     if monitor_tunnel_job:
         root.after_cancel(monitor_tunnel_job)
         monitor_tunnel_job = None
+    print(f"Tunnel to {active_lgv} was closed")
     active_ssh_tunnel, active_lgv = None, None
     host_unreachable_count = 0
     tunnel_label.config(text="")
@@ -2204,13 +2218,19 @@ def monitor_plink_status():
     # Get the stored plink proces
     if not is_plink_running():
         closed_lgv = active_lgv
-        print(f"Plink tunnel to {active_lgv} has been closed.")
+        plink_error = read_plink_error()
+        print(f"Plink tunnel to {active_lgv} has been closed. stderr: {plink_error!r}")
         tunnel_label.config(text="")
         active_ssh_tunnel = None
         active_lgv = None
         monitor_tunnel_job = None
         host_unreachable_count = 0
-        messagebox.showwarning("SSH Tunnel", f"Tunnel to {closed_lgv} closed unexpectedly")
+
+        if "password was not accepted" in plink_error.lower():
+            msg = f"Tunnel to {closed_lgv} closed: wrong password."
+        else:
+            msg = f"Tunnel to {closed_lgv} closed unexpectedly."
+        messagebox.showwarning("SSH Tunnel", msg)
         return
 
     # Network still reachable?
