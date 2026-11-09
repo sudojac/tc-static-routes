@@ -1889,6 +1889,7 @@ active_processes = {}
 active_ssh_tunnel = None  # Stores the active SSH host
 active_lgv = None
 monitor_tunnel_job = None
+tunnel_generation = 0
 
 tunnel_operation_running = False
 
@@ -1960,14 +1961,15 @@ def create_ssh_tunnel_putty():
 
 
 def reset_plink_tunnel_state():
-    """Close the active SSH tunnel and clear its state"""
-    global active_ssh_tunnel, active_lgv, monitor_tunnel_job, host_unreachable_count
+    """Close the active SSH tunnel and clear its state. Does not kill any process. Main thread only"""
+    global active_ssh_tunnel, active_lgv, monitor_tunnel_job, host_unreachable_count, tunnel_generation
     if monitor_tunnel_job:
         root.after_cancel(monitor_tunnel_job)
         monitor_tunnel_job = None
     print(f"Tunnel to {active_lgv} was closed")
     active_ssh_tunnel, active_lgv = None, None
     host_unreachable_count = 0
+    tunnel_generation += 1
     tunnel_label.config(text="")
 
 def close_ssh_tunnel_plink():
@@ -2233,8 +2235,32 @@ def monitor_plink_status():
         messagebox.showwarning("SSH Tunnel", msg)
         return
 
-    # Network still reachable?
-    host_is_alive = is_host_reachable(active_ssh_tunnel)
+    threading.Thread(
+        target=_monitor_ping_worker,
+        args=(active_ssh_tunnel, tunnel_generation),
+        daemon=True,
+    ).start()
+
+
+def _monitor_ping_worker(host, generation):
+    """Background thread: only the ping. Never touch widgets here."""
+    result = is_host_reachable(host)
+    root.after(0, _on_monitor_ping_result, generation, result)
+
+
+def _on_monitor_ping_result(generation, host_is_alive):
+    """Back on the main thread: handle the ping result and schedule the next check."""
+    global active_ssh_tunnel, active_lgv, host_unreachable_count, monitor_tunnel_job
+
+    # tunnel was closed/switched while we were pinging
+    if generation != tunnel_generation or not active_ssh_tunnel:
+        return
+
+    # a switch started while we were pinging
+    if tunnel_operation_running:
+        monitor_tunnel_job = root.after(5000, monitor_plink_status)
+        return
+
 
     if not host_is_alive.reachable:
         host_unreachable_count += 1
