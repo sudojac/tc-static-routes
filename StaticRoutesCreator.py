@@ -2028,19 +2028,25 @@ def create_ssh_tunnel_plink():
 
 def _ssh_tunnel_worker(plink_path, ssh_host, ssh_port, ssh_username, ssh_password, tunnels, lgv):
     """Background thread: network work only. Never touch widgets here."""
-    if not is_host_reachable(ssh_host):
-        root.after(0, _on_ssh_tunnel_finished, lgv, ssh_host, "unreachable", False)
-        return
-
+    result = "Failed"
     closed_old = False
-    if is_plink_running():
-        close_plink()
-        closed_old = True
+    try:
+        if not is_host_reachable(ssh_host):
+            root.after(0, _on_ssh_tunnel_finished, lgv, ssh_host, "unreachable", False)
+            return
 
-    tunnel_active = open_plink_with_tunnels(plink_path, ssh_host, ssh_port,
-                                            ssh_username, ssh_password, tunnels)
-    result = "ok" if tunnel_active else "failed"
-    root.after(0, _on_ssh_tunnel_finished, lgv, ssh_host, result, closed_old)
+        if is_plink_running():
+            close_plink()
+            closed_old = True
+
+        tunnel_active = open_plink_with_tunnels(plink_path, ssh_host, ssh_port,
+                                                ssh_username, ssh_password, tunnels)
+        result = "ok" if tunnel_active else "failed"
+    except Exception as e:
+        print(f"[Tunnel worker] Unexpected error: {e}")
+        result = "failed"
+    finally:
+        root.after(0, _on_ssh_tunnel_finished, lgv, ssh_host, result, closed_old)
 
 
 def _on_ssh_tunnel_finished(lgv, ssh_host, result, closed_old):
@@ -4142,6 +4148,7 @@ setup_tunnel_button.grid(row=1, column=3, padx=5, pady=5)
 
 tunnel_label = ttk.Label(frame_save_file, text="", foreground="#4682B4", font=("Segoe UI semibold", 9))
 tunnel_label.place(relx=1.0, rely=0.0, x=-5, y=-20, anchor="ne")
+tunnel_label.config(padding=(6,1))
 
 status_restart_label = ttk.Label(frame_save_file, text="", foreground="#4682B4")
 status_restart_label.place(relx=0.5, rely=0.0, x=0, y=-20, anchor="ne")
