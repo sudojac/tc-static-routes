@@ -1,3 +1,13 @@
+[3.6.2.4]
+- ssh tunnel small adjustments
+- add a flashing background to the tunnel active label when changing lgv
+- add thread safe method to monitor connection to host while ssh tunnel is open
+- detect errors and save a log when opening ssh tunnel, show warning to the user when password is wrong
+- adjust SSH tunnel creation to be thread safe
+- improve SSH tunnel creation logic, remove messagebox when closing tunnel, also when opening a new one when other one is already running
+- adjust menu for ssh tunel option, show cascade options only when tunnel is active
+- copy lgv numbers to clipboard after test button if successful
+ 
 [3.6.2.3]
 - .spec file modification
 - add status label showing the user when local TwinCAT is restarting
