@@ -2028,11 +2028,12 @@ def create_ssh_tunnel_plink():
 
 def _ssh_tunnel_worker(plink_path, ssh_host, ssh_port, ssh_username, ssh_password, tunnels, lgv):
     """Background thread: network work only. Never touch widgets here."""
-    result = "Failed"
+    result = "failed"
     closed_old = False
     try:
         if not is_host_reachable(ssh_host):
-            root.after(0, _on_ssh_tunnel_finished, lgv, ssh_host, "unreachable", False)
+            # root.after(0, _on_ssh_tunnel_finished, lgv, ssh_host, "unreachable", False)
+            result = "unreachable"
             return
 
         if is_plink_running():
