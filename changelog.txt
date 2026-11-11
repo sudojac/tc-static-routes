@@ -1,3 +1,6 @@
+[3.6.2.5]
+- bugfix ssh tunnel label updated even when no tunnel created
+ 
 [3.6.2.4]
 - ssh tunnel small adjustments
 - add a flashing background to the tunnel active label when changing lgv
